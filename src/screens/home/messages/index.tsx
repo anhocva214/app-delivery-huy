@@ -43,10 +43,12 @@ import addTokenToAxiosInterceptor from '../../../config/axios/interceptor';
 const socket = io(process.env.EXPO_PUBLIC_API_URL as string);
 const Tab = createBottomTabNavigator();
 import moment from 'moment';
+import { getUserInfo } from '../../../redux-toolkit/actions/user';
 
 const { height, width } = Dimensions.get('window');
 
 interface IUserMessage {
+  receiverId: number
   fullname: string;
   lastMessage: {
     content: string;
@@ -64,13 +66,27 @@ const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
 
   const goToNoti = async () => {};
 
+  useEffect(() => {
+    // @ts-ignore
+    dispatch(getUserInfo());
+  }, []);
+
   React.useEffect(() => {
     socket.on('message/get_all/response', async (data) => {
       let list = JSON.parse(data);
-      let listGroups = _.groupBy(list, 'receiver');
+      // Sắp xếp tin nhắn theo thời gian giảm dần để lấy tin nhắn mới nhất
+      const sortedMessages = _.orderBy(list, 'createdAt', 'desc');
+
+      // Lấy tin nhắn mới nhất của mỗi cặp sender và receiver
+      const latestMessages = _.chain(sortedMessages)
+        .groupBy((message) => `${message.sender}-${message.receiver}`)
+        .mapValues((group) => _.head(group)) // Chỉ lấy tin nhắn mới nhất từ mỗi nhóm
+        .values()
+        .value();
+
       let userMessages = await Promise.all(
-        Object.keys(listGroups).map(async (key) => {
-          let userId = key;
+        latestMessages.map(async (item) => {
+          let userId = item.sender == authUser.id ? item.receiver: item.sender;
           addTokenToAxiosInterceptor(await AsyncStorage.getItem('token'));
           let response = await axios({
             baseURL: process.env.EXPO_PUBLIC_API_URL,
@@ -78,23 +94,27 @@ const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
             method: 'GET',
           });
           return {
+            receiverId: parseInt(userId),
             fullname: response?.data?.data?.userResult?.[0]?.fullName,
-            lastMessage: listGroups[key].pop(),
+            lastMessage: {
+              content: item.content,
+              createdAt: item.createdAt
+            },
           };
         })
-      );
-      // console.log(userMessages)
-      setListMessages(userMessages);
+      )
+      // console.log(_.uniqBy(userMessages, 'receiverId'))
+      setListMessages(_.uniqBy(userMessages, 'receiverId'));
     });
 
-    if (authUser.id) {
-      socket.emit('message/get_all/request', authUser.id);
+    if (authUser?.id) {
+      console.log("User ID:", authUser?.id);
+      socket.emit('message/get_all/request', authUser?.id);
     }
   }, [authUser]);
 
   return (
     <View flex={1}>
-      {/* <SafeAreaView> */}
       <ImageBackground
         source={require('../../../public/images/backgroundProfile.png')}
         style={styles.backgroundImage}
@@ -151,7 +171,7 @@ const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
           renderItem={({ item, index }) => (
             <TouchableOpacity
               onPress={() => {
-                navigation.push('MessageDetailScreen', item);
+                navigation.push('MessageDetailScreen', {...item, senderId: authUser.id});
               }}
             >
               <Flex

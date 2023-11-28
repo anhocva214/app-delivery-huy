@@ -1,4 +1,11 @@
-import { Avatar, Flex, Image, Text, View } from 'native-base';
+import {
+  Avatar,
+  Flex,
+  Image,
+  KeyboardAvoidingView,
+  Text,
+  View,
+} from 'native-base';
 import React = require('react');
 import {
   ScrollView,
@@ -13,6 +20,7 @@ import { getUserInfo } from '../../../redux-toolkit/actions/user';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import moment = require('moment');
 const socket = io(process.env.EXPO_PUBLIC_API_URL as string);
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 interface IDataChat {
   sender: number;
@@ -40,6 +48,8 @@ export default function MessageDetailScreen({
   const { authUser } = useSelector((stateRedux: any) => stateRedux.userReducer);
   const [dataListChat, setDataListChat] = React.useState<IDataChat[]>([]);
   const [fullname, setFullname] = React.useState('');
+  const [receiverId, setReceiverId] = React.useState(0)
+  const [senderId, setSenderId] = React.useState(authUser.id)
 
   React.useEffect(() => {
     // @ts-ignore
@@ -48,29 +58,50 @@ export default function MessageDetailScreen({
 
   React.useEffect(() => {
     let userMessage: IUserMessage = route.params as any;
+    console.log("🚀 ~ file: MessageDetail.tsx:61 ~ React.useEffect ~ userMessage:", userMessage)
     setFullname(userMessage.fullname);
+    setReceiverId(route.params?.receiverId)
+    setSenderId(route.params?.senderId)
 
     socket.on('message/get_all/response', async (data) => {
-      let list = JSON.parse(data);
-      setDataListChat(list);
+      let list: IDataChat[] = JSON.parse(data);
+      // console.log("🚀 ~ file: MessageDetail.tsx:67 ~ socket.on ~ list:", list)
+      const listIds = [route.params?.receiverId , route.params?.senderId ]
+      const listFilter = list.filter(item => listIds.includes(item.sender) && listIds.includes(item.receiver))
+      setDataListChat(listFilter);
     });
 
-    if (authUser.id) {
-      socket.emit('message/get_all/request', authUser.id);
+    if (authUser?.id) {
+      socket.emit('message/get_all/request', route.params?.senderId);
     }
+
+    socket.on(`message/receive`, (data)=>{
+      let obj: {userId: string, data: IDataChat[]} = JSON.parse(data);
+      if (obj.userId == route.params?.senderId){
+        const list = obj.data
+        const listIds = [route.params?.receiverId , route.params?.senderId ]
+        const listFilter = list.filter(item => listIds.includes(item.sender) && listIds.includes(item.receiver))
+        setDataListChat(listFilter);
+      }
+    })
+    
   }, [authUser]);
 
   const sendMessage = () => {
     try {
+      if (!textTyping) {
+        return;
+      }
       let data: IDataChat = {
-        sender: authUser.id,
+        sender: senderId,
         content: textTyping,
-        receiver: 2,
+        receiver: receiverId,
         createdAt: new Date(),
       };
-      console.log(data);
+      // console.log(data);
       socket.emit('message', JSON.stringify(data));
       setTextTyping('');
+      
     } catch (err) {
       console.log(err);
     }
@@ -142,16 +173,16 @@ export default function MessageDetailScreen({
         </Flex>
         <Flex h="84%" align="flex-end" px="3">
           <ScrollView
-            style={{ flex: 1, width: '100%' }}
+            style={{ flex: 1, width: '100%', paddingTop: 20}}
             ref={scrollViewRef}
             onContentSizeChange={() =>
-              scrollViewRef.current.scrollToEnd({ animated: true })
+              scrollViewRef.current.scrollToEnd({ })
             }
           >
             {dataListChat.map((item, index) => {
-              if (item.sender == authUser.id) {
+              if (item.sender == senderId) {
                 return (
-                  <View key={index}>
+                  <View key={index} mb="3">
                     <Flex flexDirection="row" w="full" justify="flex-end">
                       <Flex
                         bg="#1D272F"
@@ -174,7 +205,7 @@ export default function MessageDetailScreen({
                 );
               } else {
                 return (
-                  <View key={index}>
+                  <View key={index} mb="3">
                     <Flex flexDirection="row" w="full">
                       <Flex
                         bg="#F9F9F9"
@@ -196,6 +227,8 @@ export default function MessageDetailScreen({
                 );
               }
             })}
+
+            <View h={100} />
           </ScrollView>
         </Flex>
         <Flex h="5%" flexDirection="row" align="center" px="3">
@@ -204,7 +237,7 @@ export default function MessageDetailScreen({
               value={textTyping}
               onChangeText={setTextTyping}
               style={{ width: '100%', padding: 10 }}
-              onEndEditing={sendMessage}
+              // onSubmitEditing={sendMessage}
               placeholder="Type your message"
             />
           </Flex>
