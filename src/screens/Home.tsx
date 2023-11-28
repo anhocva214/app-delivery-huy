@@ -167,7 +167,6 @@ const HomeScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const OrderItem = ({ item }) => {
-    console.log("🚀 ~ file: Home.tsx:164 ~ OrderItem ~ item:", item)
     return (
       <Flex mb="4">
         <TouchableOpacity>

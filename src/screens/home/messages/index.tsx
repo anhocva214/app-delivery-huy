@@ -37,21 +37,60 @@ import { useDispatch, useSelector } from 'react-redux';
 import _ from 'lodash';
 import io from 'socket.io-client';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import addTokenToAxiosInterceptor from '../../../config/axios/interceptor';
 const socket = io(process.env.EXPO_PUBLIC_API_URL as string);
 const Tab = createBottomTabNavigator();
+import moment from 'moment';
 
 const { height, width } = Dimensions.get('window');
 
+interface IUserMessage {
+  fullname: string;
+  lastMessage: {
+    content: string;
+    createdAt: Date;
+  };
+}
 
 const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
   const dispatch = useDispatch();
   const { height } = useWindowDimensions();
+  const { authUser } = useSelector((stateRedux: any) => stateRedux.userReducer);
+  const [listMessages, setListMessages] = useState<IUserMessage[]>([]);
 
   const [hasNoti, setHasNoti] = useState(false);
 
   const goToNoti = async () => {};
 
-  const goToScan = async () => {};
+  React.useEffect(() => {
+    socket.on('message/get_all/response', async (data) => {
+      let list = JSON.parse(data);
+      let listGroups = _.groupBy(list, 'receiver');
+      let userMessages = await Promise.all(
+        Object.keys(listGroups).map(async (key) => {
+          let userId = key;
+          addTokenToAxiosInterceptor(await AsyncStorage.getItem('token'));
+          let response = await axios({
+            baseURL: process.env.EXPO_PUBLIC_API_URL,
+            url: `/api/users/${userId}`,
+            method: 'GET',
+          });
+          return {
+            fullname: response?.data?.data?.userResult?.[0]?.fullName,
+            lastMessage: listGroups[key].pop(),
+          };
+        })
+      );
+      // console.log(userMessages)
+      setListMessages(userMessages);
+    });
+
+    if (authUser.id) {
+      socket.emit('message/get_all/request', authUser.id);
+    }
+  }, [authUser]);
 
   return (
     <View flex={1}>
@@ -108,11 +147,13 @@ const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
       </ImageBackground>
       <View style={styles.containerContent}>
         <FlatList
-          data={_.range(0, 10)}
+          data={listMessages}
           renderItem={({ item, index }) => (
-            <TouchableOpacity key={item} onPress={()=>{
-              navigation.push("MessageDetailScreen")
-            }}>
+            <TouchableOpacity
+              onPress={() => {
+                navigation.push('MessageDetailScreen', item);
+              }}
+            >
               <Flex
                 flexDirection={'row'}
                 alignItems={'center'}
@@ -139,20 +180,22 @@ const MessagesScreen = ({ navigation }: NativeStackScreenProps<any>) => {
                       fontSize={14}
                       fontWeight={'semibold'}
                     >
-                      Maddy lin {item}
+                      {item.fullname}
                     </Text>
                     <Text color="#A7A9B7" fontSize={14}>
-                      Hai Rizal, I’m on the way to your...
+                      {item.lastMessage.content}
                     </Text>
                   </Flex>
                 </Flex>
                 <Text color="#A7A9B7" fontWeight={'semibold'} fontSize={12}>
-                  3:74 Pm
+                  {moment(new Date(item.lastMessage.createdAt)).format(
+                    'HH:MM A'
+                  )}
                 </Text>
               </Flex>
             </TouchableOpacity>
           )}
-          keyExtractor={(item) => item.toString()}
+          keyExtractor={(item, index) => index.toString()}
           style={{
             marginBottom: 10,
           }}
